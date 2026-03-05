@@ -735,7 +735,7 @@ if db_mode == "combined":
         st.markdown("<br>", unsafe_allow_html=True)
 
         if n_ops_sem_hist == 0:
-            st.success("✅ Todas as operações possuem pelo menos um registro de histórico vinculado!", icon="✅")
+            st.success("✅ Todas as operações possuem pelo menos um registro de histórico vinculado!")
         else:
             st.warning(
                 f"⚠️ **{n_ops_sem_hist}** operação(ões) do ControleDiário não possuem nenhum "
@@ -784,10 +784,10 @@ if db_mode == "combined":
         )
 
         v2a, v2b, v2c = st.columns(3)
-        v2a.markdown(metric_card("�", f"{n_chaves_hist_sem:,}",
+        v2a.markdown(metric_card("🔎", f"{n_chaves_hist_sem:,}",
                                  "Chaves únicas no Histórico não encontradas nas Operações",
                                  "red" if n_chaves_hist_sem > 0 else "teal"), unsafe_allow_html=True)
-        v2b.markdown(metric_card("�", f"{len(hist_sem_op):,}",
+        v2b.markdown(metric_card("📜", f"{len(hist_sem_op):,}",
                                  "Linhas do Histórico sem correspondência",
                                  "orange" if len(hist_sem_op) > 0 else "teal"), unsafe_allow_html=True)
         _pct_hist_sem = len(hist_sem_op) / total_hist * 100 if total_hist else 0
@@ -798,13 +798,12 @@ if db_mode == "combined":
         st.markdown("<br>", unsafe_allow_html=True)
 
         if n_chaves_hist_sem == 0:
-            st.success("✅ Todos os registros de Histórico possuem uma Operação correspondente!", icon="✅")
+            st.success("✅ Todos os registros de Histórico possuem uma Operação correspondente!")
         else:
             st.warning(
                 f"⚠️ Foram encontradas **{n_chaves_hist_sem}** chave(s) de caso no Histórico "
                 f"que **não existem** na tabela de Operações "
-                f"({len(hist_sem_op)} linha(s) no total).",
-                icon="�",
+                f"({len(hist_sem_op)} linha(s) no total)."
             )
 
             # Uma linha por chave única, com contagem de linhas e primeiros valores
@@ -1029,8 +1028,7 @@ if db_mode == "history":
         if cols_vazias > 0:
             st.warning(
                 f"⚠️ **{cols_vazias} coluna(s) completamente vazias** no arquivo de histórico: "
-                f"`{col_id}` e `{col_dur}`. Estas colunas não serão úteis na migração.",
-                icon="🚫",
+                f"`{col_id}` e `{col_dur}`. Estas colunas não serão úteis na migração."
             )
 
     # ── TAB 2 · Tarefas & Executantes ────────────────────────────────────────
