@@ -446,33 +446,37 @@ if db_mode == "combined":
         else:                                                     cls = "sbadge-default"
         return f'<span class="sbadge {cls}">{status}</span>'
 
-    # ── KPIs ──────────────────────────────────────────────────────────────────
+    # ── Cálculos de vínculo (usados nos KPIs e na aba de validação) ─────────
     total_ops  = len(df_cd)
     total_hist = len(df_hist_raw)
-    ops_c_hist = (df_cd["Qtd Histórico"] > 0).sum()
-    pct_ch     = ops_c_hist / total_ops * 100 if total_ops else 0
 
-    # Casos do histórico sem correspondência nas operações
-    chaves_cd   = set(df_cd[COL_CD].astype(str).str.strip())
-    chaves_hist = df_hist_raw[COL_HIST].astype(str).str.strip()
-    mask_sem_op = ~chaves_hist.isin(chaves_cd)
-    hist_sem_op = df_hist_raw[mask_sem_op].copy()
-    n_hist_sem_op = hist_sem_op[COL_HIST].nunique()  # operações únicas sem match
+    # Operações SEM nenhum registro de histórico
+    ops_sem_hist    = df_cd[df_cd["Qtd Histórico"] == 0].copy()
+    n_ops_sem_hist  = len(ops_sem_hist)
 
-    k1, k2, k3 = st.columns(3)
+    # Histórico cujas chaves NÃO existem na tabela de operações
+    chaves_cd       = set(df_cd[COL_CD].astype(str).str.strip())
+    chaves_hist_ser = df_hist_raw[COL_HIST].astype(str).str.strip()
+    mask_hist_sem   = ~chaves_hist_ser.isin(chaves_cd)
+    hist_sem_op     = df_hist_raw[mask_hist_sem].copy()
+    n_chaves_hist_sem = hist_sem_op[COL_HIST].nunique()
+
+    k1, k2, k3, k4 = st.columns(4)
     for col_k, icon, val, label, color in [
-        (k1, "📋", f"{total_ops:,}",          "Operações",                              "blue"),
-        (k2, "📜", f"{total_hist:,}",          "Registros de Histórico",                 "purple"),
-        (k3, "📊", f"{pct_ch:.0f}%",           f"Com Histórico ({ops_c_hist}/{total_ops})", "teal"),
+        (k1, "📋", f"{total_ops:,}",         "Total de Operações",                        "blue"),
+        (k2, "📜", f"{total_hist:,}",         "Total de Registros no Histórico",           "purple"),
+        (k3, "⚠️",  f"{n_ops_sem_hist:,}",   "Operações SEM Histórico",                  "orange" if n_ops_sem_hist > 0 else "teal"),
+        (k4, "🔍", f"{n_chaves_hist_sem:,}", "Chaves do Histórico não encontradas nas Operações", "red" if n_chaves_hist_sem > 0 else "teal"),
     ]:
         col_k.markdown(metric_card(icon, val, label, color), unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
     # ── Abas ──────────────────────────────────────────────────────────────────
-    tab_drill, tab_charts, tab_table = st.tabs([
+    tab_drill, tab_charts, tab_vinculo, tab_table = st.tabs([
         "📋 Operações + Histórico",
         "📊 Análises Visuais",
+        "🔍 Validação de Vínculo",
         "🔗 Tabela Combinada",
     ])
 
@@ -682,91 +686,174 @@ if db_mode == "combined":
                 fig_s2.update_layout(**PLOTLY_LAYOUT, height=320)
                 st.plotly_chart(fig_s2, use_container_width=True)
 
-        # ── Seção: Casos do Histórico sem Operação ────────────────────────────
-        st.markdown("---")
-        st.markdown('<div class="section-header" style="border-color:#f85149;">'
-                    '🔍 Casos do Histórico sem correspondência nas Operações</div>',
-                    unsafe_allow_html=True)
+    # ── TAB 3 · Validação de Vínculo ─────────────────────────────────────────
+    with tab_vinculo:
+        from datetime import datetime as _dt2
 
-        _chaves_cd_view   = set(df_cd[COL_CD].astype(str).str.strip())
-        _chaves_hist_view = df_hist_raw[COL_HIST].astype(str).str.strip()
-        _mask_sem         = ~_chaves_hist_view.isin(_chaves_cd_view)
-        _hist_sem         = df_hist_raw[_mask_sem].copy()
-        _n_registros_sem  = len(_hist_sem)
-        _n_casos_sem      = _hist_sem[COL_HIST].nunique()
+        st.markdown(
+            """
+            <div style="background:linear-gradient(135deg,#1c2333,#161b26);border:1px solid #30363d;
+                        border-radius:12px;padding:16px 20px;margin-bottom:20px;">
+                <div style="font-size:.9rem;color:#c9d1d9;line-height:1.6;">
+                    🎯 <b style="color:#e6edf3;">Objetivo desta aba:</b> verificar se os dois arquivos
+                    exportados (<b>ControleDiário</b> e <b>pxGetWorkHistory</b>) podem ser vinculados
+                    corretamente pelo campo chave.
+                    Dois problemas podem impedir o vínculo:
+                    <br><br>
+                    <b style="color:#ffa657;">① Operações sem Histórico</b> — operações do ControleDiário
+                    que não possuem nenhum registro no pxGetWorkHistory. Isso pode indicar que o histórico
+                    não foi exportado para esses casos, ou que eles realmente não tiveram eventos.
+                    <br><br>
+                    <b style="color:#ff7b72;">② Histórico sem Operação</b> — registros do pxGetWorkHistory
+                    cujas chaves de caso não existem no ControleDiário. Isso pode indicar que o export
+                    do ControleDiário não cobriu todos os casos, ou que esses registros pertencem a
+                    outro tipo de caso.
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
-        ka, kb, kc = st.columns(3)
-        ka.markdown(metric_card("🚨", f"{_n_casos_sem:,}",
-                                "Casos únicos sem Operação", "red"), unsafe_allow_html=True)
-        kb.markdown(metric_card("📄", f"{_n_registros_sem:,}",
-                                "Registros de Histórico órfãos", "orange"), unsafe_allow_html=True)
-        _pct_sem = _n_registros_sem / len(df_hist_raw) * 100 if len(df_hist_raw) else 0
-        kc.markdown(metric_card("📊", f"{_pct_sem:.1f}%",
-                                "% do Total de Histórico", "purple"), unsafe_allow_html=True)
+        # ── BLOCO 1: Operações SEM histórico ────────────────────────────────
+        st.markdown(
+            '<div class="section-header" style="border-color:#ffa657;">'
+            '① Operações sem nenhum registro no Histórico</div>',
+            unsafe_allow_html=True,
+        )
+
+        v1a, v1b, v1c = st.columns(3)
+        v1a.markdown(metric_card("⚠️", f"{n_ops_sem_hist:,}",
+                                 "Operações sem Histórico",
+                                 "orange" if n_ops_sem_hist > 0 else "teal"), unsafe_allow_html=True)
+        v1b.markdown(metric_card("📋", f"{total_ops:,}",
+                                 "Total de Operações", "blue"), unsafe_allow_html=True)
+        _pct_ops_sem = n_ops_sem_hist / total_ops * 100 if total_ops else 0
+        v1c.markdown(metric_card("📊", f"{_pct_ops_sem:.1f}%",
+                                 "% das Operações sem Histórico",
+                                 "orange" if _pct_ops_sem > 0 else "teal"), unsafe_allow_html=True)
 
         st.markdown("<br>", unsafe_allow_html=True)
 
-        if _n_casos_sem == 0:
-            st.success("✅ Todos os registros de histórico possuem uma operação correspondente!",
-                       icon="✅")
+        if n_ops_sem_hist == 0:
+            st.success("✅ Todas as operações possuem pelo menos um registro de histórico vinculado!", icon="✅")
         else:
             st.warning(
-                f"⚠️ Foram encontrados **{_n_casos_sem}** caso(s) no Histórico que **não possuem"
-                f" correspondência** na tabela de Operações ({_n_registros_sem} registros no total).",
-                icon="🚨",
+                f"⚠️ **{n_ops_sem_hist}** operação(ões) do ControleDiário não possuem nenhum "
+                f"registro correspondente no pxGetWorkHistory.",
+                icon="⚠️",
             )
-
-            # Tabela resumida: uma linha por caso único
-            _resumo_sem = (
-                _hist_sem.groupby(COL_HIST)
-                .agg(
-                    **{"Qtd Registros Histórico": (COL_HIST, "count")},
-                )
-                .reset_index()
-                .sort_values("Qtd Registros Histórico", ascending=False)
-                .rename(columns={COL_HIST: "ID / Chave do Caso (Histórico)"})
-            )
-
-            # Adicionar colunas extras se existirem no histórico
-            for _extra_col in ["Nome da Tarefa", "Executante", "Tipo de Caso/Suporte", "Criar hora"]:
-                if _extra_col in _hist_sem.columns:
-                    _first_vals = (
-                        _hist_sem.dropna(subset=[COL_HIST])
-                        .groupby(COL_HIST)[_extra_col]
-                        .first()
-                        .reset_index()
-                        .rename(columns={COL_HIST: "ID / Chave do Caso (Histórico)"})
-                    )
-                    _resumo_sem = _resumo_sem.merge(_first_vals, on="ID / Chave do Caso (Histórico)", how="left")
-
+            _cols_ops_sem = [c for c in [
+                "ID do Caso", COL_CD, "Status de caso", "Nome Fantasia",
+                "Tipo Operação", "Data Criação", "Operador"
+            ] if c in ops_sem_hist.columns]
             st.markdown(
                 f'<p style="color:#8b949e;font-size:.85rem;margin-bottom:8px">'
-                f'Lista de <b style="color:#ff7b72">{_n_casos_sem}</b> caso(s) únicos '
-                f'no Histórico sem correspondência nas Operações:</p>',
+                f'Lista das <b style="color:#ffa657">{n_ops_sem_hist}</b> operação(ões) '
+                f'sem Histórico:</p>',
                 unsafe_allow_html=True,
             )
             st.dataframe(
-                _resumo_sem.reset_index(drop=True),
+                ops_sem_hist[_cols_ops_sem].reset_index(drop=True),
                 use_container_width=True,
                 hide_index=True,
-                height=min(400, 60 + _n_casos_sem * 38),
+                height=min(400, 60 + n_ops_sem_hist * 38),
             )
 
-            # Download
-            from datetime import datetime as _dt2
             @st.cache_data
-            def _sem_op_excel(df):
+            def _ops_sem_hist_excel(df):
                 buf = io.BytesIO()
                 with pd.ExcelWriter(buf, engine="openpyxl") as w:
                     df.to_excel(w, index=False)
                 return buf.getvalue()
 
             st.download_button(
-                "📥 Exportar lista de casos sem operação (Excel)",
-                data=_sem_op_excel(_hist_sem),
+                "📥 Exportar Operações sem Histórico (Excel)",
+                data=_ops_sem_hist_excel(ops_sem_hist),
+                file_name=f"operacoes_sem_historico_{_dt2.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="down_ops_sem_hist",
+            )
+
+        st.markdown("---")
+
+        # ── BLOCO 2: Histórico SEM operação correspondente ────────────────────
+        st.markdown(
+            '<div class="section-header" style="border-color:#f85149;">'
+            '② Registros do Histórico cuja chave não existe nas Operações</div>',
+            unsafe_allow_html=True,
+        )
+
+        v2a, v2b, v2c = st.columns(3)
+        v2a.markdown(metric_card("�", f"{n_chaves_hist_sem:,}",
+                                 "Chaves únicas no Histórico não encontradas nas Operações",
+                                 "red" if n_chaves_hist_sem > 0 else "teal"), unsafe_allow_html=True)
+        v2b.markdown(metric_card("�", f"{len(hist_sem_op):,}",
+                                 "Linhas do Histórico sem correspondência",
+                                 "orange" if len(hist_sem_op) > 0 else "teal"), unsafe_allow_html=True)
+        _pct_hist_sem = len(hist_sem_op) / total_hist * 100 if total_hist else 0
+        v2c.markdown(metric_card("📊", f"{_pct_hist_sem:.1f}%",
+                                 "% do Histórico sem correspondência",
+                                 "red" if _pct_hist_sem > 0 else "teal"), unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        if n_chaves_hist_sem == 0:
+            st.success("✅ Todos os registros de Histórico possuem uma Operação correspondente!", icon="✅")
+        else:
+            st.warning(
+                f"⚠️ Foram encontradas **{n_chaves_hist_sem}** chave(s) de caso no Histórico "
+                f"que **não existem** na tabela de Operações "
+                f"({len(hist_sem_op)} linha(s) no total).",
+                icon="�",
+            )
+
+            # Uma linha por chave única, com contagem de linhas e primeiros valores
+            _resumo_hist_sem = (
+                hist_sem_op
+                .groupby(COL_HIST)
+                .agg(**{"Qtd linhas no Histórico": (COL_HIST, "count")})
+                .reset_index()
+                .sort_values("Qtd linhas no Histórico", ascending=False)
+                .rename(columns={COL_HIST: "Chave do Caso (no Histórico)"})
+            )
+            for _ec in ["Tipo de Caso/Suporte", "Nome da Tarefa", "Executante", "Criar hora"]:
+                if _ec in hist_sem_op.columns:
+                    _fv = (
+                        hist_sem_op.dropna(subset=[COL_HIST])
+                        .groupby(COL_HIST)[_ec].first().reset_index()
+                        .rename(columns={COL_HIST: "Chave do Caso (no Histórico)"})
+                    )
+                    _resumo_hist_sem = _resumo_hist_sem.merge(
+                        _fv, on="Chave do Caso (no Histórico)", how="left"
+                    )
+
+            st.markdown(
+                f'<p style="color:#8b949e;font-size:.85rem;margin-bottom:8px">'
+                f'Uma linha por chave única. Total de '
+                f'<b style="color:#ff7b72">{n_chaves_hist_sem}</b> chave(s) '
+                f'no Histórico que não foram encontradas nas Operações:</p>',
+                unsafe_allow_html=True,
+            )
+            st.dataframe(
+                _resumo_hist_sem.reset_index(drop=True),
+                use_container_width=True,
+                hide_index=True,
+                height=min(420, 60 + n_chaves_hist_sem * 38),
+            )
+
+            @st.cache_data
+            def _hist_sem_op_excel(df):
+                buf = io.BytesIO()
+                with pd.ExcelWriter(buf, engine="openpyxl") as w:
+                    df.to_excel(w, index=False)
+                return buf.getvalue()
+
+            st.download_button(
+                "📥 Exportar Histórico sem Operação (Excel)",
+                data=_hist_sem_op_excel(hist_sem_op),
                 file_name=f"historico_sem_operacao_{_dt2.now().strftime('%Y%m%d_%H%M')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key="down_sem_op",
+                key="down_hist_sem_op",
             )
 
     # ── TAB 3 · Tabela Combinada ──────────────────────────────────────────────
