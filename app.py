@@ -451,16 +451,19 @@ if db_mode == "combined":
     total_hist = len(df_hist_raw)
     ops_c_hist = (df_cd["Qtd Histórico"] > 0).sum()
     pct_ch     = ops_c_hist / total_ops * 100 if total_ops else 0
-    vol_me     = df_cd["Valor ME"].sum() if "Valor ME" in df_cd.columns else 0
-    n_moedas   = df_cd["Código ME"].nunique() if "Código ME" in df_cd.columns else 0
 
-    k1,k2,k3,k4,k5 = st.columns(5)
+    # Casos do histórico sem correspondência nas operações
+    chaves_cd   = set(df_cd[COL_CD].astype(str).str.strip())
+    chaves_hist = df_hist_raw[COL_HIST].astype(str).str.strip()
+    mask_sem_op = ~chaves_hist.isin(chaves_cd)
+    hist_sem_op = df_hist_raw[mask_sem_op].copy()
+    n_hist_sem_op = hist_sem_op[COL_HIST].nunique()  # operações únicas sem match
+
+    k1, k2, k3 = st.columns(3)
     for col_k, icon, val, label, color in [
-        (k1,"📋",f"{total_ops:,}","Operações","blue"),
-        (k2,"📜",f"{total_hist:,}","Registros de Histórico","purple"),
-        (k3,"💰",_fmt_val(vol_me),"Volume Total ME","green"),
-        (k4,"💱",n_moedas,"Moedas Distintas","orange"),
-        (k5,"📊",f"{pct_ch:.0f}%",f"Com Histórico ({ops_c_hist}/{total_ops})","teal"),
+        (k1, "📋", f"{total_ops:,}",          "Operações",                              "blue"),
+        (k2, "📜", f"{total_hist:,}",          "Registros de Histórico",                 "purple"),
+        (k3, "📊", f"{pct_ch:.0f}%",           f"Com Histórico ({ops_c_hist}/{total_ops})", "teal"),
     ]:
         col_k.markdown(metric_card(icon, val, label, color), unsafe_allow_html=True)
 
@@ -641,71 +644,130 @@ if db_mode == "combined":
                 st.plotly_chart(fig_s, use_container_width=True)
 
         with r1c2:
-            if "Código ME" in df_view.columns and "Valor ME" in df_view.columns:
-                mv = df_view.groupby("Código ME")["Valor ME"].sum().reset_index()
-                mv.columns = ["Moeda","Volume"]
-                fig_m = px.pie(mv, values="Volume", names="Moeda", hole=0.45,
-                               title="💰 Volume por Moeda", template="plotly_dark",
-                               color_discrete_sequence=COLOR_PALETTE)
-                fig_m.update_traces(textinfo="label+percent", marker=dict(line=dict(color="#0d1117", width=2)))
-                fig_m.update_layout(**PLOTLY_LAYOUT, height=320)
-                st.plotly_chart(fig_m, use_container_width=True)
+            if "Tipo Operação" in df_view.columns:
+                tc = df_view["Tipo Operação"].value_counts().nlargest(10).reset_index()
+                tc.columns = ["Tipo", "Qtd"]
+                fig_t = px.bar(tc, x="Tipo", y="Qtd", color="Qtd",
+                               color_continuous_scale=["#388bfd", "#bc8cff"],
+                               template="plotly_dark", text="Qtd", title="⚙️ Tipos de Operação")
+                fig_t.update_traces(textposition="outside")
+                fig_t.update_layout(**PLOTLY_LAYOUT, height=320, showlegend=False,
+                                    coloraxis_showscale=False, xaxis=dict(tickangle=-30))
+                st.plotly_chart(fig_t, use_container_width=True)
 
         r2c1, r2c2 = st.columns(2)
         with r2c1:
-            if "Tipo Operação" in df_view.columns:
-                tc = df_view["Tipo Operação"].value_counts().nlargest(10).reset_index()
-                tc.columns = ["Tipo","Qtd"]
-                fig_t = px.bar(tc, x="Tipo", y="Qtd", color="Qtd",
-                               color_continuous_scale=["#388bfd","#bc8cff"],
-                               template="plotly_dark", text="Qtd", title="⚙️ Tipos de Operação")
-                fig_t.update_traces(textposition="outside")
-                fig_t.update_layout(**PLOTLY_LAYOUT, height=320, showlegend=False, coloraxis_showscale=False,
-                                    xaxis=dict(tickangle=-30))
-                st.plotly_chart(fig_t, use_container_width=True)
-
-        with r2c2:
             if "Qtd Histórico" in df_view.columns:
                 hd = df_view["Qtd Histórico"].value_counts().sort_index().reset_index()
-                hd.columns = ["Qtd Histórico","Operações"]
+                hd.columns = ["Qtd Histórico", "Operações"]
                 fig_hd = px.bar(hd, x="Qtd Histórico", y="Operações", color="Operações",
-                                color_continuous_scale=["#2ea043","#56d364"],
+                                color_continuous_scale=["#2ea043", "#56d364"],
                                 template="plotly_dark", text="Operações",
                                 title="📜 Registros de Histórico por Operação")
                 fig_hd.update_traces(textposition="outside")
-                fig_hd.update_layout(**PLOTLY_LAYOUT, height=320, showlegend=False, coloraxis_showscale=False)
+                fig_hd.update_layout(**PLOTLY_LAYOUT, height=320, showlegend=False,
+                                     coloraxis_showscale=False)
                 st.plotly_chart(fig_hd, use_container_width=True)
 
-        # Evolução temporal
-        if "Data Criação" in df_view.columns:
-            st.markdown("---")
-            dt = df_view.copy()
-            dt["Mês"] = pd.to_datetime(dt["Data Criação"], errors="coerce").dt.to_period("M").astype(str)
-            dt = dt.dropna(subset=["Mês"])
-            if len(dt) > 0:
-                tempo = dt.groupby("Mês").agg(Quantidade=("ID do Caso","count"), Volume=("Valor ME","sum")).reset_index().sort_values("Mês")
-                fig_ev = go.Figure()
-                fig_ev.add_trace(go.Bar(x=tempo["Mês"], y=tempo["Quantidade"], name="Qtd Operações",
-                                        marker_color="#388bfd", opacity=0.85, yaxis="y1"))
-                fig_ev.add_trace(go.Scatter(x=tempo["Mês"], y=tempo["Volume"], name="Volume ME",
-                                            mode="lines+markers", line=dict(color="#56d364", width=2.5),
-                                            yaxis="y2"))
-                fig_ev.update_layout(
-                    **PLOTLY_LAYOUT, height=360,
-                    title="📅 Evolução Temporal",
-                    yaxis=dict(title="Quantidade"),
-                    yaxis2=dict(title="Volume ME", overlaying="y", side="right", showgrid=False),
-                    legend=dict(**LEGEND_STYLE, orientation="h"),
-                )
-                st.plotly_chart(fig_ev, use_container_width=True)
+        with r2c2:
+            if "Status de caso" in df_view.columns:
+                sc2 = df_view["Status de caso"].value_counts().reset_index()
+                sc2.columns = ["Status", "Qtd"]
+                fig_s2 = px.pie(sc2, values="Qtd", names="Status", hole=0.45,
+                                title="🔀 Distribuição por Status",
+                                template="plotly_dark",
+                                color_discrete_sequence=COLOR_PALETTE)
+                fig_s2.update_traces(textinfo="label+percent",
+                                     marker=dict(line=dict(color="#0d1117", width=2)))
+                fig_s2.update_layout(**PLOTLY_LAYOUT, height=320)
+                st.plotly_chart(fig_s2, use_container_width=True)
 
-        # Top clientes
-        if "Razão Social" in df_view.columns and "Valor ME" in df_view.columns:
-            st.markdown("---")
-            st.markdown('<div class="section-header">🏆 Top 10 Clientes por Volume ME</div>', unsafe_allow_html=True)
-            top = df_view.groupby("Razão Social").agg(Operações=("ID do Caso","count"), Volume_ME=("Valor ME","sum")).reset_index().sort_values("Volume_ME",ascending=False).head(10)
-            top["Volume_ME"] = top["Volume_ME"].apply(_fmt_val)
-            st.dataframe(top.reset_index(drop=True), use_container_width=True, hide_index=True)
+        # ── Seção: Casos do Histórico sem Operação ────────────────────────────
+        st.markdown("---")
+        st.markdown('<div class="section-header" style="border-color:#f85149;">'
+                    '🔍 Casos do Histórico sem correspondência nas Operações</div>',
+                    unsafe_allow_html=True)
+
+        _chaves_cd_view   = set(df_cd[COL_CD].astype(str).str.strip())
+        _chaves_hist_view = df_hist_raw[COL_HIST].astype(str).str.strip()
+        _mask_sem         = ~_chaves_hist_view.isin(_chaves_cd_view)
+        _hist_sem         = df_hist_raw[_mask_sem].copy()
+        _n_registros_sem  = len(_hist_sem)
+        _n_casos_sem      = _hist_sem[COL_HIST].nunique()
+
+        ka, kb, kc = st.columns(3)
+        ka.markdown(metric_card("🚨", f"{_n_casos_sem:,}",
+                                "Casos únicos sem Operação", "red"), unsafe_allow_html=True)
+        kb.markdown(metric_card("📄", f"{_n_registros_sem:,}",
+                                "Registros de Histórico órfãos", "orange"), unsafe_allow_html=True)
+        _pct_sem = _n_registros_sem / len(df_hist_raw) * 100 if len(df_hist_raw) else 0
+        kc.markdown(metric_card("📊", f"{_pct_sem:.1f}%",
+                                "% do Total de Histórico", "purple"), unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        if _n_casos_sem == 0:
+            st.success("✅ Todos os registros de histórico possuem uma operação correspondente!",
+                       icon="✅")
+        else:
+            st.warning(
+                f"⚠️ Foram encontrados **{_n_casos_sem}** caso(s) no Histórico que **não possuem"
+                f" correspondência** na tabela de Operações ({_n_registros_sem} registros no total).",
+                icon="🚨",
+            )
+
+            # Tabela resumida: uma linha por caso único
+            _resumo_sem = (
+                _hist_sem.groupby(COL_HIST)
+                .agg(
+                    **{"Qtd Registros Histórico": (COL_HIST, "count")},
+                )
+                .reset_index()
+                .sort_values("Qtd Registros Histórico", ascending=False)
+                .rename(columns={COL_HIST: "ID / Chave do Caso (Histórico)"})
+            )
+
+            # Adicionar colunas extras se existirem no histórico
+            for _extra_col in ["Nome da Tarefa", "Executante", "Tipo de Caso/Suporte", "Criar hora"]:
+                if _extra_col in _hist_sem.columns:
+                    _first_vals = (
+                        _hist_sem.dropna(subset=[COL_HIST])
+                        .groupby(COL_HIST)[_extra_col]
+                        .first()
+                        .reset_index()
+                        .rename(columns={COL_HIST: "ID / Chave do Caso (Histórico)"})
+                    )
+                    _resumo_sem = _resumo_sem.merge(_first_vals, on="ID / Chave do Caso (Histórico)", how="left")
+
+            st.markdown(
+                f'<p style="color:#8b949e;font-size:.85rem;margin-bottom:8px">'
+                f'Lista de <b style="color:#ff7b72">{_n_casos_sem}</b> caso(s) únicos '
+                f'no Histórico sem correspondência nas Operações:</p>',
+                unsafe_allow_html=True,
+            )
+            st.dataframe(
+                _resumo_sem.reset_index(drop=True),
+                use_container_width=True,
+                hide_index=True,
+                height=min(400, 60 + _n_casos_sem * 38),
+            )
+
+            # Download
+            from datetime import datetime as _dt2
+            @st.cache_data
+            def _sem_op_excel(df):
+                buf = io.BytesIO()
+                with pd.ExcelWriter(buf, engine="openpyxl") as w:
+                    df.to_excel(w, index=False)
+                return buf.getvalue()
+
+            st.download_button(
+                "📥 Exportar lista de casos sem operação (Excel)",
+                data=_sem_op_excel(_hist_sem),
+                file_name=f"historico_sem_operacao_{_dt2.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="down_sem_op",
+            )
 
     # ── TAB 3 · Tabela Combinada ──────────────────────────────────────────────
     with tab_table:
